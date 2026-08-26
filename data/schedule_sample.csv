@@ -1,0 +1,12 @@
+route_id,operator,departure_time,arrival_time,vessel_type,date,via
+piraeus_mykonos,Blue Star Ferries,07:25,10:35,conventional,2026-08-20,
+piraeus_mykonos,SeaJets,08:00,10:20,highspeed,2026-08-20,Syros
+piraeus_mykonos,Golden Star Ferries,11:15,13:35,highspeed,2026-08-20,
+piraeus_mykonos,Blue Star Ferries,19:15,22:25,conventional,2026-08-20,Syros;Tinos
+piraeus_santorini,SeaJets,07:25,10:50,highspeed,2026-08-20,Paros
+piraeus_santorini,Blue Star Ferries,07:25,15:05,conventional,2026-08-20,Naxos
+piraeus_santorini,Hellenic Seaways,08:35,11:55,highspeed,2026-08-20,
+piraeus_santorini,Blue Star Ferries,20:00,03:45,conventional,2026-08-20,
+mykonos_santorini,SeaJets,10:45,12:35,highspeed,2026-08-20,
+mykonos_santorini,Golden Star Ferries,15:30,17:20,highspeed,2026-08-20,
+mykonos_santorini,SeaJets,18:20,20:10,highspeed,2026-08-20,

@@ -1,0 +1,93 @@
+{
+  "ports": [
+    {
+      "id": "piraeus",
+      "name": "Piraeus",
+      "lat": 37.9475,
+      "lon": 23.6367
+    },
+    {
+      "id": "mykonos",
+      "name": "Mykonos (New Port)",
+      "lat": 37.4467,
+      "lon": 25.3289
+    },
+    {
+      "id": "santorini",
+      "name": "Santorini (Athinios Port)",
+      "lat": 36.3722,
+      "lon": 25.4103
+    },
+    {
+      "id": "naxos",
+      "name": "Naxos",
+      "lat": 37.1053,
+      "lon": 25.3781
+    },
+    {
+      "id": "paros",
+      "name": "Paros (Parikia)",
+      "lat": 37.0853,
+      "lon": 25.1500
+    },
+    {
+      "id": "syros",
+      "name": "Syros (Ermoupoli)",
+      "lat": 37.4438,
+      "lon": 24.9427
+    },
+    {
+      "id": "tinos",
+      "name": "Tinos",
+      "lat": 37.5381,
+      "lon": 25.1602
+    },
+    {
+      "id": "crete",
+      "name": "Heraklion (Crete)",
+      "lat": 35.3403,
+      "lon": 25.1344
+    },
+    {
+      "id": "rhodes",
+      "name": "Rhodes Town",
+      "lat": 36.4472,
+      "lon": 28.2300
+    },
+    {
+      "id": "corfu",
+      "name": "Corfu Town",
+      "lat": 39.6000,
+      "lon": 19.8700
+    },
+    {
+      "id": "milos",
+      "name": "Milos (Adamas)",
+      "lat": 36.7250,
+      "lon": 24.4450
+    },
+    {
+      "id": "kos",
+      "name": "Kos Town",
+      "lat": 36.8500,
+      "lon": 27.2330
+    },
+    {
+      "id": "ios",
+      "name": "Ios",
+      "lat": 36.7230,
+      "lon": 25.2729
+    }
+  ],
+  "routes": [
+    {"id": "piraeus_mykonos", "from": "piraeus", "to": "mykonos"},
+    {"id": "piraeus_santorini", "from": "piraeus", "to": "santorini"},
+    {"id": "mykonos_santorini", "from": "mykonos", "to": "santorini"},
+    {"id": "piraeus_naxos", "from": "piraeus", "to": "naxos"},
+    {"id": "piraeus_paros", "from": "piraeus", "to": "paros"},
+    {"id": "naxos_santorini", "from": "naxos", "to": "santorini"},
+    {"id": "paros_santorini", "from": "paros", "to": "santorini"},
+    {"id": "mykonos_naxos", "from": "mykonos", "to": "naxos"},
+    {"id": "mykonos_paros", "from": "mykonos", "to": "paros"}
+  ]
+}

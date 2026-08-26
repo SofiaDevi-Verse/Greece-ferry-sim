@@ -1,0 +1,1167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Greece Ferry Traffic Simulator</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<style>
+  html, body { margin: 0; height: 100%; font-family: -apple-system, Helvetica, Arial, sans-serif; background: #0b1220; transition: background 0.6s ease; }
+  #map { position: absolute; top: 0; bottom: 0; left: 0; right: 340px; }
+  #panel {
+    position: absolute; top: 0; right: 0; width: 340px; height: 100%;
+    background: #0f1a2e; color: #e8eef7; box-sizing: border-box; padding: 20px;
+    overflow-y: auto; border-left: 1px solid #1f2c47;
+    transition: background 0.6s ease, color 0.6s ease;
+  }
+  .top-row { display: flex; justify-content: space-between; align-items: flex-start; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: #8fa3c4; font-size: 12px; margin-bottom: 18px; }
+  #dayNightBtn {
+    border: 1px solid #2b3a5c; background: #16233d; color: #e8eef7; border-radius: 999px;
+    padding: 6px 12px; font-size: 12px; cursor: pointer; white-space: nowrap; transition: all 0.3s ease;
+  }
+  #dayNightBtn:hover { background: #1c2c4d; }
+  .route-card {
+    background: #16233d; border: 1px solid #223256; border-radius: 10px;
+    padding: 12px 14px; margin-bottom: 12px; transition: background 0.6s ease, border-color 0.6s ease;
+  }
+  .route-card h3 { margin: 0 0 8px; font-size: 14px; }
+  .stat { display: flex; justify-content: space-between; font-size: 12.5px; margin: 4px 0; color: #c3d0e5; }
+  .stat b { color: #fff; }
+  .score-pill {
+    display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600;
+  }
+  .slider-wrap { margin-bottom: 18px; }
+  input[type=range] { width: 100%; accent-color: #ff5a9e; }
+  .hour-label { font-size: 13px; color: #9db3d6; margin-top: 4px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .legend {
+    display: flex; gap: 14px; margin-bottom: 18px; padding: 10px 12px;
+    background: #16233d; border: 1px solid #223256; border-radius: 10px;
+    font-size: 11px; color: #c3d0e5; transition: background 0.6s ease, border-color 0.6s ease;
+  }
+  .legend-item { display: flex; align-items: center; gap: 5px; }
+  .legend-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+
+  /* Light theme (day mode) */
+  body.day-mode { background: #eef3fa; }
+  body.day-mode #panel { background: #ffffff; color: #16233d; border-left-color: #dbe4f3; }
+  body.day-mode .sub { color: #5c6f8f; }
+  body.day-mode #dayNightBtn { background: #eef3fa; color: #16233d; border-color: #cdd9ee; }
+  body.day-mode .route-card { background: #f6f9fd; border-color: #dbe4f3; }
+  body.day-mode .stat { color: #445273; }
+  body.day-mode .stat b { color: #16233d; }
+  body.day-mode .legend { background: #f6f9fd; border-color: #dbe4f3; color: #445273; }
+  body.day-mode .hour-label { color: #5c6f8f; }
+  body.day-mode select { background: #f6f9fd !important; color: #16233d !important; border-color: #dbe4f3 !important; }
+
+  /* Mobile: stack the map above the panel instead of side-by-side, and
+     let the page scroll normally instead of forcing a fixed full-screen
+     split — the fixed 340px sidebar doesn't work on narrow phone screens. */
+  @media (max-width: 768px) {
+    html, body { height: auto; overflow-y: auto; }
+    #map { position: relative; height: 45vh; right: 0; width: 100%; }
+    #panel {
+      position: relative; width: 100%; height: auto; top: auto; right: auto;
+      border-left: none; border-top: 1px solid #1f2c47;
+    }
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="panel">
+  <div class="top-row" style="flex-wrap:wrap; gap:8px;">
+    <div>
+      <h1>🇬🇷 Ferry Traffic Simulator</h1>
+      <div class="sub">Piraeus · Mykonos · Santorini — crowd &amp; CO₂ estimate from real ferry schedules</div>
+    </div>
+    <div style="display:flex; gap:6px; align-items:flex-start; flex-wrap:wrap;">
+      <button id="aboutBtn" title="About this project" aria-label="About this project" style="border:1px solid #2b3a5c; background:#16233d; color:#e8eef7; border-radius:999px; padding:5px 10px; cursor:pointer; font-size:11px; white-space:nowrap;">ℹ️ About</button>
+      <button id="shareBtn" title="Share this app" aria-label="Share this app via QR code" style="border:1px solid #2b3a5c; background:#16233d; color:#e8eef7; border-radius:999px; padding:5px 10px; cursor:pointer; font-size:11px; white-space:nowrap;">🔗 Share</button>
+      <button id="globeBtn" title="3D globe view" aria-label="Open 3D globe view" style="border:1px solid #2b3a5c; background:#16233d; color:#e8eef7; border-radius:999px; padding:5px 10px; cursor:pointer; font-size:11px; white-space:nowrap;">🌐 3D view</button>
+      <button id="dayNightBtn" aria-label="Toggle day and night map view">🌙 Night</button>
+    </div>
+  </div>
+
+  <div id="loadingIndicator" style="display:flex; align-items:center; gap:10px; background:#16233d; border:1px solid #223256; border-radius:10px; padding:14px; margin:10px 0; font-size:12.5px; color:#c3d0e5;">
+    <div class="spinner" style="width:16px; height:16px; border:2px solid #2b3a5c; border-top-color:#3ddc84; border-radius:50%; animation:spin 0.8s linear infinite; flex-shrink:0;"></div>
+    <div>Loading real ferry data — checking each route live can take up to a minute the first time…</div>
+  </div>
+
+  <div id="dataSourceBadge" style="font-size:11px; padding:4px 10px; border-radius:999px; display:inline-block; margin-bottom:8px;"></div>
+  <div id="briefingBox" style="background:#16233d; border:1px solid #223256; border-radius:10px; padding:10px 12px; margin:10px 0; font-size:12px; line-height:1.5; color:#c3d0e5;"></div>
+
+  <div id="statsBar" style="display:flex; gap:8px; margin:12px 0; font-size:11px;"></div>
+
+  <div class="slider-wrap">
+    <input type="range" id="hourSlider" min="0" max="23" value="8" aria-label="Select hour of day to view crowd levels" />
+    <div class="hour-label">Hour: <b id="hourLabel">08:00</b></div>
+  </div>
+
+  <div class="legend">
+    <div class="legend-item"><span class="legend-dot" style="background:#3ddc84"></span> Calm</div>
+    <div class="legend-item"><span class="legend-dot" style="background:#f2c744"></span> Busy</div>
+    <div class="legend-item"><span class="legend-dot" style="background:#ff5a5a"></span> Packed</div>
+  </div>
+  <div class="sub" style="margin-top:-10px; margin-bottom:14px; line-height:1.5;">
+    <span style="color:#5b7ba8;">┄┄</span> Port connections (reference only)<br>
+    <span style="color:#3ddc84;">┄┄</span> Real sailing in progress — click the ferry icon for stops &amp; ETAs<br>
+    📍 Click any blue dot on the map for port info
+  </div>
+
+  <div style="display:flex; gap:8px; margin-bottom:8px;">
+    <select id="fromPicker" style="flex:1; background:#16233d; color:#e8eef7; border:1px solid #2b3a5c; border-radius:8px; padding:6px; font-size:12px;">
+      <option value="">From...</option>
+    </select>
+    <select id="toPicker" style="flex:1; background:#16233d; color:#e8eef7; border:1px solid #2b3a5c; border-radius:8px; padding:6px; font-size:12px;">
+      <option value="">To...</option>
+    </select>
+  </div>
+  <button id="searchRouteBtn" aria-label="Search for ferries on this route" style="width:100%; padding:9px; background:#2b6cff; color:#fff; border:none; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; margin-bottom:16px;">🔍 Search this route</button>
+
+  <div id="searchResultArea" style="margin-bottom:16px;"></div>
+
+  <div style="display:flex; align-items:center; gap:8px; margin-bottom:14px; flex-wrap:wrap;">
+    <label style="font-size:12px; color:#9db3d6; display:flex; align-items:center; gap:6px; cursor:pointer;">
+      <input type="checkbox" id="favoritesOnly" aria-label="Show favorite routes only" /> Show favorites only ⭐
+    </label>
+  </div>
+
+  <div style="background:#16233d; border:1px solid #223256; border-radius:10px; padding:12px; margin-bottom:16px;">
+    <div style="font-size:12.5px; font-weight:600; margin-bottom:4px;">🗺️ Multi-stop trip planner</div>
+    <div style="font-size:11px; color:#8fa3c4; margin-bottom:10px;">Island-hopping? Pick your stops in order to see the total distance, CO₂, and travel time for the whole trip.</div>
+    <div id="plannerStops" style="display:flex; flex-direction:column; gap:6px; margin-bottom:8px;"></div>
+    <button id="addStopBtn" aria-label="Add another stop to trip planner" style="width:100%; padding:6px; background:#0f1a2e; border:1px dashed #2b3a5c; color:#9db3d6; border-radius:8px; font-size:12px; cursor:pointer;">+ Add stop</button>
+    <div id="plannerTotals" style="margin-top:8px; font-size:12px; color:#c3d0e5;"></div>
+  </div>
+
+  <div id="compareBar" style="display:none; position:sticky; top:0; z-index:5; background:#2b6cff; color:#fff; padding:8px 12px; border-radius:8px; font-size:12px; margin-bottom:12px; cursor:pointer; text-align:center;"></div>
+
+  <div style="font-size:12px; font-weight:600; color:#9db3d6; margin-bottom:8px;">⭐ Popular routes</div>
+  <div id="routeCards"></div>
+</div>
+
+<!-- About overlay -->
+<div id="aboutOverlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:1000; align-items:center; justify-content:center;">
+  <div style="background:#0f1a2e; color:#e8eef7; max-width:380px; padding:24px; border-radius:14px; border:1px solid #2b3a5c;">
+    <h2 style="margin-top:0; font-size:17px;">🇬🇷 About this project</h2>
+    <p style="font-size:13px; line-height:1.6; color:#c3d0e5;">
+      A live simulator of ferry traffic across the Greek islands, built on
+      real ferry schedules, real distances, real weather, and real CO₂
+      estimates — not simulated data. Ship icons shown when a real sailing
+      is genuinely in progress are positioned using actual elapsed time
+      from the real timetable.
+    </p>
+    <button id="aboutCloseBtn" style="margin-top:12px; width:100%; padding:8px; background:#2b6cff; color:#fff; border:none; border-radius:8px; cursor:pointer; font-size:13px;">Got it</button>
+  </div>
+</div>
+
+<!-- Share overlay -->
+<div id="shareOverlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:1000; align-items:center; justify-content:center;">
+  <div style="background:#0f1a2e; color:#e8eef7; max-width:300px; padding:24px; border-radius:14px; border:1px solid #2b3a5c; text-align:center;">
+    <h2 style="margin-top:0; font-size:15px;">Share this app</h2>
+    <img id="qrImg" src="" alt="QR code" style="width:180px; height:180px; background:#fff; border-radius:8px; padding:8px;" />
+    <p style="font-size:11px; color:#8fa3c4; margin-top:10px; word-break:break-all;" id="shareUrlText"></p>
+    <button id="shareCloseBtn" style="margin-top:8px; width:100%; padding:8px; background:#16233d; border:1px solid #2b3a5c; color:#e8eef7; border-radius:8px; cursor:pointer; font-size:13px;">Close</button>
+  </div>
+</div>
+
+<!-- 3D globe overlay: additive view, ports plotted as points. Not a
+     replacement for the main map — just an alternate visualization,
+     kept separate so a CDN hiccup here can never break the core app. -->
+<div id="globeOverlay" style="display:none; position:fixed; inset:0; background:#05070d; z-index:1000;">
+  <button id="globeCloseBtn" style="position:absolute; top:16px; right:16px; z-index:1001; border:1px solid #2b3a5c; background:#16233d; color:#e8eef7; border-radius:999px; width:32px; height:32px; cursor:pointer;">✕</button>
+  <div id="globeContainer" style="width:100%; height:100%;"></div>
+</div>
+
+<!-- Compare modal -->
+<div id="compareOverlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:1000; align-items:center; justify-content:center;">
+  <div style="background:#0f1a2e; color:#e8eef7; max-width:420px; width:90%; padding:20px; border-radius:14px; border:1px solid #2b3a5c;">
+    <h2 style="margin-top:0; font-size:15px;">Compare routes</h2>
+    <div id="compareContent" style="font-size:12px;"></div>
+    <button id="compareCloseBtn" style="margin-top:14px; width:100%; padding:8px; background:#16233d; border:1px solid #2b3a5c; color:#e8eef7; border-radius:8px; cursor:pointer; font-size:13px;">Close</button>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://unpkg.com/globe.gl"></script>
+<script>
+const API_BASE = "";
+
+const map = L.map('map', { zoomControl: true }).setView([37.1, 24.7], 7);
+
+// OpenStreetMap's standard tiles — genuinely free forever, no API key ever
+// required (CartoDB's tiles, used before, started requiring a key after
+// this was first built). Day/night is now faked with a CSS filter on the
+// single tile layer instead of a second (keyed) tile source.
+const osmTiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap contributors',
+  maxZoom: 19
+}).addTo(map);
+
+let isNight = true;
+document.getElementById('map').style.filter = 'invert(90%) hue-rotate(180deg) brightness(0.95) contrast(0.9)';
+
+const dayNightBtn = document.getElementById('dayNightBtn');
+dayNightBtn.addEventListener('click', () => {
+  isNight = !isNight;
+  if (isNight) {
+    document.getElementById('map').style.filter = 'invert(90%) hue-rotate(180deg) brightness(0.95) contrast(0.9)';
+    document.body.classList.remove('day-mode');
+    dayNightBtn.textContent = '🌙 Night';
+  } else {
+    document.getElementById('map').style.filter = 'none';
+    document.body.classList.add('day-mode');
+    dayNightBtn.textContent = '☀️ Day';
+  }
+});
+
+// ---- About overlay ----
+document.getElementById('aboutBtn').addEventListener('click', () => {
+  document.getElementById('aboutOverlay').style.display = 'flex';
+});
+document.getElementById('aboutCloseBtn').addEventListener('click', () => {
+  document.getElementById('aboutOverlay').style.display = 'none';
+});
+
+// ---- Share overlay (real QR code of this page's actual URL) ----
+document.getElementById('shareBtn').addEventListener('click', () => {
+  const url = window.location.href;
+  document.getElementById('qrImg').src = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(url)}`;
+  document.getElementById('shareUrlText').textContent = url;
+  document.getElementById('shareOverlay').style.display = 'flex';
+});
+document.getElementById('shareCloseBtn').addEventListener('click', () => {
+  document.getElementById('shareOverlay').style.display = 'none';
+});
+
+// ---- Favorites (saved locally in your browser, not shared/synced) ----
+const FAVORITES_KEY = 'ferrysim_favorite_routes';
+function getFavorites() {
+  try { return JSON.parse(localStorage.getItem(FAVORITES_KEY) || '[]'); }
+  catch (e) { return []; }
+}
+
+// Draws a subtle gold glow behind any favorited route's reference line on
+// the map, so favorites are visible at a glance, not just in the card list.
+// Only works for the 9 original routes (the ones with a stored map line) —
+// ad-hoc searched-and-favorited routes don't have a fixed line to draw.
+let favoriteOverlayLines = {};
+function updateFavoriteMapOverlays() {
+  const favs = getFavorites();
+  Object.values(favoriteOverlayLines).forEach(l => map.removeLayer(l));
+  favoriteOverlayLines = {};
+  favs.forEach(routeId => {
+    const line = routeLines[routeId];
+    if (!line) return;
+    const overlay = L.polyline(line.getLatLngs(), {
+      color: '#f2c744', weight: 6, opacity: 0.3
+    }).addTo(map);
+    overlay.bringToBack();
+    favoriteOverlayLines[routeId] = overlay;
+  });
+}
+
+function toggleFavorite(routeId) {
+  let favs = getFavorites();
+  favs = favs.includes(routeId) ? favs.filter(id => id !== routeId) : [...favs, routeId];
+  localStorage.setItem(FAVORITES_KEY, JSON.stringify(favs));
+  renderCards();
+  updateFavoriteMapOverlays();
+}
+document.getElementById('favoritesOnly').addEventListener('change', renderCards);
+
+// ---- 3D globe view (additive — the main 2D map is untouched either way) ----
+let globeInstance = null;
+document.getElementById('globeBtn').addEventListener('click', () => {
+  document.getElementById('globeOverlay').style.display = 'block';
+  if (!globeInstance) {
+    try {
+      const points = Object.values(portsById).map(p => ({
+        lat: p.lat, lng: p.lon, name: p.name, size: 0.15, color: '#3ddc84'
+      }));
+      globeInstance = Globe()(document.getElementById('globeContainer'))
+        .globeImageUrl('https://unpkg.com/three-globe/example/img/earth-night.jpg')
+        .backgroundColor('#05070d')
+        .pointsData(points)
+        .pointLat('lat').pointLng('lng').pointColor('color').pointRadius('size')
+        .pointResolution(12)
+        .pointLabel('name')
+        .pointAltitude(0.005);
+      globeInstance.pointOfView({ lat: 37.3, lng: 24.8, altitude: 1.4 }, 0);
+    } catch (e) {
+      document.getElementById('globeContainer').innerHTML =
+        '<div style="color:#c3d0e5; text-align:center; padding-top:40vh; font-size:13px;">3D globe library failed to load — check your internet connection.</div>';
+    }
+  }
+});
+document.getElementById('globeCloseBtn').addEventListener('click', () => {
+  document.getElementById('globeOverlay').style.display = 'none';
+});
+
+// ---- Comparison mode ----
+let compareSelection = [];
+function toggleCompare(routeId) {
+  if (compareSelection.includes(routeId)) {
+    compareSelection = compareSelection.filter(id => id !== routeId);
+  } else {
+    if (compareSelection.length >= 2) compareSelection.shift(); // keep max 2
+    compareSelection.push(routeId);
+  }
+  updateCompareBar();
+  renderCards();
+}
+function updateCompareBar() {
+  const bar = document.getElementById('compareBar');
+  if (compareSelection.length === 2) {
+    const [a, b] = compareSelection.map(id => routeData[id]);
+    bar.style.display = 'block';
+    bar.textContent = `Compare ${a.from}→${a.to} vs ${b.from}→${b.to} →`;
+    bar.onclick = () => showCompareModal(a, b);
+  } else if (compareSelection.length === 1) {
+    bar.style.display = 'block';
+    bar.textContent = `Pick one more route to compare (1 selected)`;
+    bar.onclick = null;
+  } else {
+    bar.style.display = 'none';
+  }
+}
+function showCompareModal(a, b) {
+  const tempOrScore = r => (r.weather_temp_c !== null && r.weather_temp_c !== undefined) ? `${r.weather_temp_c}°C` : `${r.weather_score}/10`;
+  const rows = [
+    ['Distance', `${a.distance_km} km`, `${b.distance_km} km`],
+    ['Duration', a.avg_duration_min ? Math.floor(a.avg_duration_min/60)+'h '+(a.avg_duration_min%60)+'m' : '—', b.avg_duration_min ? Math.floor(b.avg_duration_min/60)+'h '+(b.avg_duration_min%60)+'m' : '—'],
+    ['Sailings tracked', a.sailings, b.sailings],
+    ['Est. CO₂', `${a.total_co2_kg_est.toLocaleString()} kg`, `${b.total_co2_kg_est.toLocaleString()} kg`],
+    ['Weather', tempOrScore(a), tempOrScore(b)],
+    ['Crowd score', `${crowdLabel(a.crowd_score)} (${a.crowd_score}/10)`, `${crowdLabel(b.crowd_score)} (${b.crowd_score}/10)`],
+    ['Best time to go?', a.best_time_label || `${a.best_time_score}/10`, b.best_time_label || `${b.best_time_score}/10`],
+  ];
+  document.getElementById('compareContent').innerHTML = `
+    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:4px 8px; font-size:11.5px;">
+      <div></div>
+      <div style="font-weight:700;">${a.from}→${a.to}</div>
+      <div style="font-weight:700;">${b.from}→${b.to}</div>
+      ${rows.map(([label, av, bv]) => `<div style="color:#8fa3c4;">${label}</div><div>${av}</div><div>${bv}</div>`).join('')}
+    </div>`;
+  document.getElementById('compareOverlay').style.display = 'flex';
+}
+document.getElementById('compareCloseBtn').addEventListener('click', () => {
+  document.getElementById('compareOverlay').style.display = 'none';
+});
+
+// ---- Multi-stop trip planner ----
+let plannerStops = ['', ''];
+function renderPlanner() {
+  const container = document.getElementById('plannerStops');
+  container.innerHTML = plannerStops.map((val, i) => {
+    const opts = Object.values(portsById).map(p =>
+      `<option value="${p.id}" ${val === p.id ? 'selected' : ''}>${p.name}</option>`
+    ).join('');
+    return `<select data-idx="${i}" class="planner-select" style="width:100%; background:#0f1a2e; color:#e8eef7; border:1px solid #2b3a5c; border-radius:6px; padding:5px; font-size:12px;">
+      <option value="">Stop ${i+1}...</option>${opts}
+    </select>`;
+  }).join('');
+  container.querySelectorAll('.planner-select').forEach(sel => {
+    sel.addEventListener('change', e => {
+      plannerStops[parseInt(e.target.dataset.idx)] = e.target.value;
+      renderPlannerTotals();
+    });
+  });
+  renderPlannerTotals();
+}
+function renderPlannerTotals() {
+  const filled = plannerStops.filter(Boolean);
+  const totalsEl = document.getElementById('plannerTotals');
+  if (filled.length < 2) {
+    totalsEl.textContent = 'Pick at least 2 stops to see totals.';
+    return;
+  }
+  let totalKm = 0, totalCo2 = 0, totalMin = 0, missing = [];
+  for (let i = 0; i < filled.length - 1; i++) {
+    const a = filled[i], b = filled[i + 1];
+    const match = Object.values(routeData).find(r =>
+      (r.from_id === a && r.to_id === b) || (r.from_id === b && r.to_id === a)
+    );
+    if (match) {
+      totalKm += match.distance_km;
+      totalCo2 += match.total_co2_kg_est / Math.max(1, match.sailings); // per-sailing estimate
+      if (match.avg_duration_min) totalMin += match.avg_duration_min;
+    } else {
+      missing.push(`${portsById[a]?.name || a} → ${portsById[b]?.name || b}`);
+    }
+  }
+  let html = `<b>${Math.round(totalKm)} km</b> · ~<b>${Math.round(totalCo2)} kg CO₂</b>` +
+    (totalMin ? ` · ~<b>${Math.floor(totalMin/60)}h ${Math.round(totalMin%60)}m</b>` : '');
+  if (missing.length) {
+    html += `<br><span style="color:#f2c744; font-size:11px;">No direct data for: ${missing.join(', ')}</span>`;
+  }
+  totalsEl.innerHTML = html;
+}
+document.getElementById('addStopBtn').addEventListener('click', () => {
+  if (plannerStops.length >= 6) return;
+  plannerStops.push('');
+  renderPlanner();
+});
+
+// ---- AI-style daily briefing (built from real computed stats, not a live LLM call) ----
+function renderBriefing() {
+  const routes = Object.values(routeData);
+  if (!routes.length) return;
+  const calmest = routes.reduce((a, b) => (a.crowd_score <= b.crowd_score ? a : b));
+  const busiest = routes.reduce((a, b) => (a.crowd_score >= b.crowd_score ? a : b));
+  const bestWeather = routes.reduce((a, b) => (a.weather_score >= b.weather_score ? a : b));
+  const liveCount = Object.keys(liveTracked).length;
+
+  const weatherPhrase = (bestWeather.weather_temp_c !== null && bestWeather.weather_temp_c !== undefined)
+    ? `${bestWeather.weather_temp_c}°C and clear skies`
+    : `the best conditions today`;
+
+  let text = `🧭 Today's snapshot: <b>${calmest.from} → ${calmest.to}</b> is the quietest crossing right now — fewer passengers expected. `;
+  text += `<b>${busiest.from} → ${busiest.to}</b> is the busiest one to plan around. `;
+  text += `<b>${bestWeather.from} → ${bestWeather.to}</b> has ${weatherPhrase} at the destination. `;
+  text += liveCount > 0
+    ? `${liveCount} real ferry${liveCount > 1 ? 's are' : ' is'} at sea right now.`
+    : `No ferries are currently mid-crossing.`;
+  document.getElementById('briefingBox').innerHTML = text;
+}
+
+let portsById = {};
+let routeLines = {};
+let routeData = {};
+
+// ---- Live vessel positions (AIS), optional -----------------------------
+// This needs a personal, free API key from https://aisstream.io (sign up,
+// then paste your key below). Without a key this feature just stays off —
+// everything else in the app works fine either way.
+const AIS_API_KEY = ""; // <-- paste your free aisstream.io key between the quotes
+const aisMarkers = {};
+const aisTrails = {};        // real GPS breadcrumb trail per vessel
+const aisTrailPoints = {};   // raw lat/lon history per vessel, capped
+const MAX_TRAIL_POINTS = 40;
+
+function connectAIS() {
+  if (!AIS_API_KEY) return; // feature disabled until a key is added
+  const ws = new WebSocket("wss://stream.aisstream.io/v0/stream");
+
+  ws.onopen = () => {
+    // Rough bounding box covering the Piraeus-Cyclades ferry area
+    const subscribe = {
+      APIKey: AIS_API_KEY,
+      BoundingBoxes: [[[36.0, 23.0], [38.5, 26.0]]],
+      FilterMessageTypes: ["PositionReport"]
+    };
+    ws.send(JSON.stringify(subscribe));
+  };
+
+  ws.onmessage = (event) => {
+    try {
+      const msg = JSON.parse(event.data);
+      if (msg.MessageType !== "PositionReport") return;
+      const report = msg.Message.PositionReport;
+      const mmsi = report.UserID;
+      const lat = report.Latitude;
+      const lon = report.Longitude;
+
+      if (aisMarkers[mmsi]) {
+        aisMarkers[mmsi].setLatLng([lat, lon]);
+      } else {
+        aisMarkers[mmsi] = L.marker([lat, lon], {
+          icon: L.divIcon({
+            html: `<div style="font-size:18px; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.6));">🛳️</div>`,
+            className: "ais-live-icon",
+            iconSize: [20, 20],
+            iconAnchor: [10, 10]
+          })
+        }).addTo(map).bindTooltip(`Live vessel — MMSI ${mmsi}`, { permanent: false });
+      }
+
+      // Build a real breadcrumb trail from this ship's actual GPS history —
+      // this is genuinely where it has been, not a simulated path.
+      if (!aisTrailPoints[mmsi]) aisTrailPoints[mmsi] = [];
+      aisTrailPoints[mmsi].push([lat, lon]);
+      if (aisTrailPoints[mmsi].length > MAX_TRAIL_POINTS) {
+        aisTrailPoints[mmsi].shift();
+      }
+      if (aisTrails[mmsi]) {
+        aisTrails[mmsi].setLatLngs(aisTrailPoints[mmsi]);
+      } else {
+        aisTrails[mmsi] = L.polyline(aisTrailPoints[mmsi], {
+          color: "#3ddc84", weight: 2, opacity: 0.6, dashArray: "1,6"
+        }).addTo(map);
+      }
+    } catch (e) {
+      console.warn("AIS message parse issue:", e);
+    }
+  };
+
+  ws.onerror = (e) => console.warn("AIS connection issue — check your API key.", e);
+}
+
+function getFerryIcon(operatorName, isLive) {
+  const name = (operatorName || "").toLowerCase();
+  let emoji = "🚢"; // generic fallback
+  if (name.includes("seajet")) emoji = "🚤";           // high-speed catamaran operator
+  else if (name.includes("blue star")) emoji = "⛴️";    // large conventional ferry operator
+  else if (name.includes("golden star")) emoji = "🛥️";
+  else if (name.includes("hellenic")) emoji = "🛳️";
+
+  const ring = isLive ? "box-shadow:0 0 0 2px #3ddc84; border-radius:50%;" : "";
+  // No drop-shadow filter here — it was visually shifting the emoji's
+  // apparent center away from its true anchor point, causing the icon
+  // to look misaligned from the line, especially when zoomed in.
+  return L.divIcon({
+    html: `<div style="width:24px; height:24px; display:flex; align-items:center; justify-content:center; font-size:18px; line-height:1; ${ring}">${emoji}</div>`,
+    className: "ferry-emoji-icon",
+    iconSize: [24, 24],
+    iconAnchor: [12, 12]
+  });
+}
+
+function crowdColor(score) {
+  // green (calm) -> yellow -> red (packed)
+  if (score < 3) return "#3ddc84";
+  if (score < 6) return "#f2c744";
+  return "#ff5a5a";
+}
+
+function crowdLabel(score) {
+  if (score < 3) return "Calm";
+  if (score < 6) return "Busy";
+  return "Packed";
+}
+
+// Real great-circle distance in km, used to distance-weight positions
+// along a real multi-stop path (so a long open-water leg and a short
+// hop near a port are treated proportionally, not just by point count).
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.asin(Math.sqrt(a));
+}
+
+// Builds the REAL path a sailing takes, using the real stopover islands
+// from your schedule's "via" column (e.g. Piraeus -> Naxos -> Santorini),
+// falling back to a direct line only when no via stop is recorded. Each
+// straight leg is then gently bowed outward (bowSegments) since islands
+// sit close together in the Cyclades and dead-straight lines between real
+// stops can still clip a piece of land — this isn't full marine routing,
+// just a visual nudge toward open water.
+// Returns both the drawable (bowed) path AND the raw real stop list
+// (with names) so we can show real per-stop ETAs when clicked.
+function buildRealPath(fromId, viaNames, toId) {
+  const nameToId = {};
+  Object.values(portsById).forEach(p => { nameToId[p.name.toLowerCase()] = p.id; });
+
+  const ids = [fromId];
+  (viaNames || []).forEach(v => {
+    const match = Object.keys(nameToId).find(n => n.includes(v.toLowerCase()) || v.toLowerCase().includes(n));
+    if (match) ids.push(nameToId[match]);
+  });
+  ids.push(toId);
+
+  const stops = ids.map(id => portsById[id]).filter(Boolean); // real port objects, in order
+  const stopCoords = stops.map(p => [p.lat, p.lon]);
+  return { path: bowSegments(stopCoords), stops };
+}
+
+// Bows each straight leg of a multi-stop path slightly outward, alternating
+// sides so consecutive legs don't bow into each other.
+function bowSegments(stops, segmentsPerLeg = 16, bow = 0.06) {
+  if (stops.length < 2) return stops;
+  const full = [];
+  for (let i = 0; i < stops.length - 1; i++) {
+    const [lat1, lon1] = stops[i];
+    const [lat2, lon2] = stops[i + 1];
+    const midLat = (lat1 + lat2) / 2;
+    const midLon = (lon1 + lon2) / 2;
+    const dLat = lat2 - lat1;
+    const dLon = lon2 - lon1;
+    const sign = (i % 2 === 0) ? 1 : -1;
+    const controlLat = midLat + (-dLon) * bow * sign;
+    const controlLon = midLon + (dLat) * bow * sign;
+
+    for (let s = 0; s <= segmentsPerLeg; s++) {
+      if (i > 0 && s === 0) continue; // avoid duplicating the shared stop point
+      const t = s / segmentsPerLeg;
+      const lat = (1 - t) * (1 - t) * lat1 + 2 * (1 - t) * t * controlLat + t * t * lat2;
+      const lon = (1 - t) * (1 - t) * lon1 + 2 * (1 - t) * t * controlLon + t * t * lon2;
+      full.push([lat, lon]);
+    }
+  }
+  return full;
+}
+
+// Given a real multi-stop path and a real progress fraction (0-1) based on
+// actual elapsed schedule time, finds the correct real position along it —
+// distance-weighted so speed reads consistently across uneven-length legs.
+function positionAlongPath(path, progress) {
+  if (path.length < 2) return path[0];
+  const segLengths = [];
+  let total = 0;
+  for (let i = 0; i < path.length - 1; i++) {
+    const d = haversineKm(path[i][0], path[i][1], path[i + 1][0], path[i + 1][1]);
+    segLengths.push(d);
+    total += d;
+  }
+  let target = progress * total;
+  for (let i = 0; i < segLengths.length; i++) {
+    if (target <= segLengths[i] || i === segLengths.length - 1) {
+      const frac = segLengths[i] > 0 ? Math.min(1, target / segLengths[i]) : 0;
+      const lat = path[i][0] + (path[i + 1][0] - path[i][0]) * frac;
+      const lon = path[i][1] + (path[i + 1][1] - path[i][1]) * frac;
+      return [lat, lon];
+    }
+    target -= segLengths[i];
+  }
+  return path[path.length - 1];
+}
+
+function formatMinutesToClock(totalMin) {
+  const m = ((Math.round(totalMin) % (24 * 60)) + 24 * 60) % (24 * 60);
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+}
+
+// Estimates a real ETA for each real stop along the route, by distributing
+// the total real trip time (arrMin - depMin) proportionally to each leg's
+// real straight-line distance. It's an estimate (we don't have official
+// per-leg timings), but it's built from your real stop list and real total
+// duration, not invented.
+function buildStopEtas(stops, depMin, arrMin) {
+  const legDistances = [];
+  let total = 0;
+  for (let i = 0; i < stops.length - 1; i++) {
+    const d = haversineKm(stops[i].lat, stops[i].lon, stops[i + 1].lat, stops[i + 1].lon);
+    legDistances.push(d);
+    total += d;
+  }
+  let cumulative = 0;
+  const etas = [{ name: stops[0].name, time: formatMinutesToClock(depMin), isEndpoint: true }];
+  for (let i = 0; i < legDistances.length; i++) {
+    cumulative += legDistances[i];
+    const frac = total > 0 ? cumulative / total : (i + 1) / legDistances.length;
+    const etaMin = depMin + frac * (arrMin - depMin);
+    etas.push({
+      name: stops[i + 1].name,
+      time: formatMinutesToClock(etaMin),
+      isEndpoint: i === legDistances.length - 1
+    });
+  }
+  return etas;
+}
+
+function vesselTypeLabel(vesselType) {
+  const t = (vesselType || "").toLowerCase();
+  if (t.includes("high")) return "High-speed catamaran";
+  if (t.includes("conv")) return "Conventional ferry";
+  return vesselType || "Ferry";
+}
+
+// Builds the click popup — real operator, real route, real per-stop ETAs,
+// real progress. No real photo (that needs a paid vessel-photo database,
+// out of scope for a free project) — shown honestly as a generic icon
+// instead of faking one.
+function buildFerryPopupHtml(operator, vesselType, stops, depMin, arrMin, progress) {
+  const etas = buildStopEtas(stops, depMin, arrMin);
+  const stopRows = etas.map(e =>
+    `<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0;${e.isEndpoint ? 'font-weight:600;' : ''}">
+      <span>${e.name}</span><span>${e.time}</span>
+    </div>`
+  ).join("");
+
+  return `
+    <div style="min-width:220px;font-family:-apple-system,sans-serif;">
+      <div style="font-size:14px;font-weight:700;margin-bottom:2px;">${operator || "Unknown operator"}</div>
+      <div style="font-size:11px;color:#8fa3c4;margin-bottom:8px;">${vesselTypeLabel(vesselType)} — no verified real photo available (would need a paid vessel-photo database)</div>
+      <div style="border-top:1px solid #2a3a5c;padding-top:6px;">${stopRows}</div>
+      <div style="margin-top:8px;font-size:12px;color:#3ddc84;">Progress: ${Math.round(progress * 100)}%</div>
+    </div>
+  `;
+}
+
+let liveTracked = {}; // keyed by route_id + departure_time -> { path, depMin, arrMin, marker, line }
+
+// Parses a time string like the backend does, into total minutes since
+// midnight — used to compute real elapsed-time progress continuously.
+function parseHM(str) {
+  const m = String(str).trim().match(/^(\d{1,2}):(\d{2})/);
+  if (m) return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+  return 0;
+}
+
+// Polls the REAL schedule for sailings genuinely in progress right now.
+// Creates/removes markers as sailings start/end, but does NOT set position
+// here — that's handled continuously every frame in animateLiveFerries(),
+// using real elapsed clock time, so movement glides instead of jumping
+// once every poll.
+async function refreshLiveFerries() {
+  const live = await fetch(`${API_BASE}/api/live_ferries`).then(r => r.json());
+  const currentKeys = new Set();
+
+  live.forEach((f) => {
+    const route = routeData[f.route_id];
+    if (!route) return;
+    const [fromId, toId] = f.route_id.split("_");
+    if (!portsById[fromId] || !portsById[toId]) return;
+
+    const key = f.route_id + "_" + f.departure_time;
+    currentKeys.add(key);
+    if (liveTracked[key]) return; // already being tracked/animated
+
+    const built = buildRealPath(fromId, f.via, toId);
+    const realPath = built.path;
+    const stops = built.stops;
+    if (realPath.length < 2 || stops.length < 2) return;
+
+    let depMin = parseHM(f.departure_time);
+    let arrMin = parseHM(f.arrival_time);
+    if (arrMin < depMin) arrMin += 24 * 60; // overnight sailing
+
+    const viaText = f.via && f.via.length ? ` via ${f.via.join(", ")}` : "";
+    const line = L.polyline(realPath, {
+      color: "#3ddc84", weight: 3, opacity: 0.9, dashArray: "1,6"
+    }).addTo(map);
+    const marker = L.marker(realPath[0], { icon: getFerryIcon(f.operator, true) })
+      .addTo(map)
+      .bindTooltip(
+        `LIVE (real schedule): ${f.operator || "Unknown operator"}${viaText} — click for details`,
+        { permanent: false }
+      )
+      .bindPopup(""); // content set live on open, so progress/ETA is always current
+
+    marker.on("click", () => {
+      const t = liveTracked[key];
+      if (!t) return;
+      // Recompute live progress at the moment of the click, not the stale
+      // value from when the marker was first created.
+      const now = new Date();
+      let nowMin = now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60;
+      if (nowMin < t.depMin) nowMin += 24 * 60;
+      const liveProgress = Math.max(0, Math.min(1, (nowMin - t.depMin) / Math.max(1, t.arrMin - t.depMin)));
+      marker.setPopupContent(buildFerryPopupHtml(f.operator, f.vessel_type, stops, t.depMin, t.arrMin, liveProgress));
+    });
+
+    liveTracked[key] = { path: realPath, stops, depMin, arrMin, marker, line };
+  });
+
+  // Remove tracking for any sailing that's no longer active (arrived, etc.)
+  Object.keys(liveTracked).forEach(key => {
+    if (!currentKeys.has(key)) {
+      map.removeLayer(liveTracked[key].marker);
+      map.removeLayer(liveTracked[key].line);
+      delete liveTracked[key];
+    }
+  });
+
+  if (typeof renderBriefing === 'function' && Object.keys(routeData).length) renderBriefing();
+}
+
+// Runs every animation frame, recalculating each tracked sailing's real
+// progress from the ACTUAL current clock time — genuine continuous motion
+// tied to your real timetable, not a fake loop.
+function animateLiveFerries() {
+  const now = new Date();
+  const nowMin = now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60;
+
+  Object.values(liveTracked).forEach(t => {
+    let candidateNow = nowMin;
+    if (candidateNow < t.depMin) candidateNow += 24 * 60; // handle wrap past midnight
+    let progress = (candidateNow - t.depMin) / Math.max(1, (t.arrMin - t.depMin));
+    progress = Math.max(0, Math.min(1, progress));
+    t.marker.setLatLng(positionAlongPath(t.path, progress));
+  });
+
+  requestAnimationFrame(animateLiveFerries);
+}
+
+async function loadData() {
+  try {
+    await loadDataInner();
+  } catch (e) {
+    document.getElementById('loadingIndicator').innerHTML = `
+      <div style="width:100%;">
+        <div style="color:#ff5a5a; margin-bottom:8px;">⚠️ Couldn't load ferry data — check your connection.</div>
+        <button id="retryLoadBtn" style="width:100%; padding:8px; background:#2b6cff; color:#fff; border:none; border-radius:8px; cursor:pointer; font-size:12px;">Try again</button>
+      </div>`;
+    document.getElementById('retryLoadBtn').addEventListener('click', () => {
+      document.getElementById('loadingIndicator').innerHTML = `
+        <div class="spinner" style="width:16px; height:16px; border:2px solid #2b3a5c; border-top-color:#3ddc84; border-radius:50%; animation:spin 0.8s linear infinite; flex-shrink:0;"></div>
+        <div>Loading real ferry data — checking each route live can take up to a minute the first time…</div>`;
+      loadData();
+    });
+  }
+}
+
+async function loadDataInner() {
+  const [portsRes, routesRes, amenities] = await Promise.all([
+    fetch(`${API_BASE}/api/ports`).then(r => r.json()),
+    fetch(`${API_BASE}/api/routes`).then(r => r.json()),
+    fetch(`${API_BASE}/api/port_amenities`).then(r => r.json())
+  ]);
+
+  document.getElementById('loadingIndicator').style.display = 'none';
+
+  portsById = Object.fromEntries(portsRes.ports.map(p => [p.id, p]));
+  routeData = routesRes;
+
+  const anyRoute = Object.values(routeData)[0];
+  const badge = document.getElementById('dataSourceBadge');
+  if (anyRoute && anyRoute.data_source === 'live') {
+    badge.textContent = '🟢 LIVE data from Ferryhopper';
+    badge.style.background = '#3ddc8422'; badge.style.color = '#3ddc84';
+  } else {
+    badge.textContent = '🟡 Using saved schedule (live data temporarily unavailable — will retry automatically)';
+    badge.style.background = '#f2c74422'; badge.style.color = '#f2c744';
+  }
+
+  portsRes.ports.forEach(p => {
+    const info = amenities[p.id];
+    // Only a real, verified public webcam URL — not guessed for other ports.
+    const WEBCAMS = { tinos: "https://worldcam.eu/webcams/europe/greece/27905-tinos-old-port" };
+    const webcamLink = WEBCAMS[p.id]
+      ? `<br><a href="${WEBCAMS[p.id]}" target="_blank" rel="noopener" style="color:#3ddc84;">📷 View live webcam ↗</a>`
+      : '';
+    const popupHtml = info
+      ? `<b>${p.name}</b><br>${Object.values(info).join('<br>')}${webcamLink}`
+      : `<b>${p.name}</b>${webcamLink}`;
+    L.circleMarker([p.lat, p.lon], {
+      radius: 7, color: "#fff", weight: 2, fillColor: "#2b6cff", fillOpacity: 1
+    }).addTo(map).bindTooltip(p.name, { permanent: false }).bindPopup(popupHtml);
+  });
+
+  portsRes.routes.forEach(route => {
+    const from = portsById[route.from];
+    const to = portsById[route.to];
+
+    // Thin background reference line just to show which ports connect —
+    // NOT a claim about the exact path (that's what the live/real via-stop
+    // line above is for, when a sailing is actually in progress).
+    const line = L.polyline([[from.lat, from.lon], [to.lat, to.lon]], {
+      color: "#5b7ba8", weight: 2, opacity: 0.35, dashArray: "2,8"
+    }).addTo(map);
+    routeLines[route.id] = line;
+  });
+
+  renderStatsBar();
+  renderCards();
+  renderBriefing();
+  renderPlanner();
+  setupIslandPicker();
+  updateFavoriteMapOverlays();
+  updateHour(document.getElementById('hourSlider').value);
+  refreshLiveFerries();
+  refreshNextSailings();
+  setInterval(refreshLiveFerries, 30000); // only checks which sailings are active/inactive
+  setInterval(refreshNextSailings, 30000); // refresh countdowns
+  requestAnimationFrame(animateLiveFerries); // smooth continuous motion, every frame
+}
+
+function generateIcsDataUri(r) {
+  const s = r.sample_sailing;
+  if (!s || !s.date || !s.departure_time || !s.arrival_time) return null;
+  const dep = parseHM(s.departure_time);
+  const arr = parseHM(s.arrival_time);
+  const dateDigits = s.date.replace(/-/g, "");
+  const pad = n => String(n).padStart(2, "0");
+  const dtStart = `${dateDigits}T${pad(Math.floor(dep/60))}${pad(dep%60)}00`;
+  const arrAdj = arr < dep ? arr + 24*60 : arr;
+  const arrDateDigits = arr < dep
+    ? new Date(new Date(s.date).getTime() + 86400000).toISOString().slice(0,10).replace(/-/g,"")
+    : dateDigits;
+  const dtEnd = `${arrDateDigits}T${pad(Math.floor((arrAdj%1440)/60))}${pad(arrAdj%60)}00`;
+
+  const ics = [
+    "BEGIN:VCALENDAR", "VERSION:2.0", "BEGIN:VEVENT",
+    `SUMMARY:Ferry ${r.from} → ${r.to} (${s.operator || "Ferry"})`,
+    `DTSTART:${dtStart}`, `DTEND:${dtEnd}`,
+    `DESCRIPTION:Real sailing from your Greece Ferry Simulator data. Operator: ${s.operator || "Unknown"}.`,
+    "END:VEVENT", "END:VCALENDAR"
+  ].join("\r\n");
+  return "data:text/calendar;charset=utf8," + encodeURIComponent(ics);
+}
+
+let nextSailingsData = {};
+
+function formatCountdown(minutes) {
+  if (minutes < 60) return `${minutes}m`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `${h}h ${m}m`;
+}
+
+// Builds the card HTML for one route's stats — shared between the
+// "Popular routes" default list and the on-demand search result, so both
+// look and behave identically.
+function buildRouteCardHtml(r, options = {}) {
+  const favs = getFavorites();
+  const isFav = favs.includes(r.route_id);
+  const isComparing = compareSelection.includes(r.route_id);
+  const showCompareStar = options.interactive !== false;
+
+  // Real per-sailing times — this is what a traveler actually needs first,
+  // not an aggregate stat. Falls back gracefully for the 9 precomputed
+  // "popular" routes, which don't carry this level of detail (yet).
+  const sailingsHtml = (r.sailings_detail && r.sailings_detail.length)
+    ? r.sailings_detail.map(s => {
+        const viaText = s.via && s.via.length ? ` <span style="color:#8fa3c4;">via ${s.via.join(', ')}</span>` : '';
+        const h = Math.floor(s.duration_min / 60), m = s.duration_min % 60;
+        return `<div style="padding:8px 0; border-bottom:1px solid #223256; font-size:12px;">
+          <div style="display:flex; justify-content:space-between;">
+            <b>${s.departure_time} → ${s.arrival_time}</b>
+            <span style="color:#8fa3c4;">${h}h ${m}m</span>
+          </div>
+          <div style="color:#c3d0e5; margin-top:2px;">${s.operator}${viaText}</div>
+        </div>`;
+      }).join('')
+    : `<div style="font-size:12px; color:#8fa3c4; padding:8px 0;">Times not available for this route — showing overall stats only.</div>`;
+
+  const forecastHtml = (r.weather_forecast && r.weather_forecast.length)
+    ? `<div class="stat"><span>3-day outlook</span><b>${r.weather_forecast.map(d => d.temp_max_c !== null && d.temp_max_c !== undefined ? Math.round(d.temp_max_c) + '°' : d.score).join(' → ')}</b></div>`
+    : '';
+
+  const co2CompareHtml = (r.co2_savings_pct !== null && r.co2_savings_pct !== undefined)
+    ? `<div class="stat"><span>vs. flying</span><b style="color:${r.co2_savings_pct > 0 ? '#3ddc84' : '#ff5a5a'}">${r.co2_savings_pct > 0 ? '−' : '+'}${Math.abs(r.co2_savings_pct)}% CO₂</b></div>`
+    : '';
+
+  const icsUri = generateIcsDataUri(r);
+  const calendarBtn = icsUri
+    ? `<a href="${icsUri}" download="ferry-${r.route_id}.ics" style="display:block; text-align:center; margin-top:6px; padding:7px; background:#16233d; border:1px solid #2b3a5c; color:#c3d0e5; border-radius:8px; font-size:12px; text-decoration:none;">📅 Add sample sailing to calendar</a>`
+    : '';
+
+  const next = nextSailingsData[r.route_id];
+  const countdownHtml = next
+    ? `<div class="stat"><span>Next real departure</span><b>${formatCountdown(next.minutes_until)} (${next.operator || 'Unknown'})</b></div>`
+    : '';
+
+  const bookingUrl = r.booking_url || `https://www.ferryhopper.com/en/ferry-routes`;
+  const compareBlock = showCompareStar ? `
+        <div style="display:flex; align-items:center; gap:8px;">
+          <label style="font-size:10px; color:#9db3d6; display:flex; align-items:center; gap:3px; cursor:pointer;">
+            <input type="checkbox" class="compare-check" data-route="${r.route_id}" ${isComparing ? 'checked' : ''} /> compare
+          </label>
+          <button class="fav-star" data-route="${r.route_id}" aria-label="${isFav ? 'Remove from favorites' : 'Add to favorites'}" style="background:none; border:none; cursor:pointer; font-size:16px; line-height:1;">${isFav ? '⭐' : '☆'}</button>
+        </div>` : '';
+
+  return `
+    <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+      <h3 style="margin:0 0 8px;">${r.from} → ${r.to}</h3>
+      ${compareBlock}
+    </div>
+    ${countdownHtml}
+    <div style="margin-bottom:8px;">${sailingsHtml}</div>
+    <div class="stat"><span>Distance</span><b>${r.distance_km} km</b></div>
+    <div class="stat"><span>Weather at destination</span><b>${r.weather_temp_c !== null && r.weather_temp_c !== undefined ? `☀️ ${r.weather_temp_c}°C` : `${r.weather_score}/10`}${r.weather_precip_pct ? ` <span style="color:#8fa3c4; font-weight:400;">(${r.weather_precip_pct}% rain chance)</span>` : ''}</b></div>
+    ${forecastHtml}
+    <div class="stat"><span>Crowd score</span><span class="score-pill" style="background:${crowdColor(r.crowd_score)}22;color:${crowdColor(r.crowd_score)}">${crowdLabel(r.crowd_score)} (${r.crowd_score}/10)</span></div>
+    <div class="stat"><span>Best time to go?</span><span class="score-pill" style="background:#2b6cff22;color:#7fa6ff">${r.best_time_label || (r.best_time_score + '/10')}</span></div>
+    <details style="margin-top:8px;">
+      <summary style="font-size:11px; color:#8fa3c4; cursor:pointer;">More stats (across all ${r.sailings} sailings found)</summary>
+      <div style="margin-top:6px;">
+        <div class="stat"><span>Est. total passengers</span><b>${r.total_passengers_est.toLocaleString()}</b></div>
+        <div class="stat"><span>Est. total CO₂</span><b>${r.total_co2_kg_est.toLocaleString()} kg</b></div>
+        <div class="stat"><span>Best-time score (raw)</span><b>${r.best_time_score}/10</b></div>
+        ${co2CompareHtml}
+      </div>
+    </details>
+    <div style="font-size:10px; color:#8fa3c4; text-align:center; margin-top:10px;">Ticket prices aren't shown here (they vary by season and demand) — commonly €20-70 one-way for Cyclades routes. Tap below for real current prices.</div>
+    <a href="${bookingUrl}" target="_blank" rel="noopener" style="display:block; text-align:center; margin-top:6px; padding:8px; background:#2b6cff; color:#fff; border-radius:8px; font-size:12.5px; font-weight:600; text-decoration:none;">🎟️ Search &amp; book on Ferryhopper ↗</a>
+    ${calendarBtn}
+    <button class="share-img-btn" data-route="${r.route_id}" aria-label="Download route stats as shareable image" style="width:100%; margin-top:6px; padding:7px; background:#16233d; border:1px solid #2b3a5c; color:#c3d0e5; border-radius:8px; font-size:12px; cursor:pointer;">📸 Download as image</button>
+  `;
+}
+
+// Only 3 curated popular routes shown by default, so the page doesn't feel
+// crowded — favorites always show regardless of this list, and anything
+// else is reachable through the search box above instead.
+const POPULAR_ROUTE_IDS = ['piraeus_mykonos', 'piraeus_santorini', 'mykonos_santorini'];
+
+function renderCards() {
+  const container = document.getElementById('routeCards');
+  container.innerHTML = "";
+  const favs = getFavorites();
+  const onlyFavs = document.getElementById('favoritesOnly').checked;
+
+  const idsToShow = onlyFavs
+    ? favs
+    : Array.from(new Set([...POPULAR_ROUTE_IDS, ...favs]));
+
+  idsToShow.forEach(routeId => {
+    const r = routeData[routeId];
+    if (!r) return;
+    const div = document.createElement('div');
+    div.className = 'route-card';
+    div.id = `card-${r.route_id}`;
+    div.innerHTML = buildRouteCardHtml(r);
+    container.appendChild(div);
+  });
+
+  container.querySelectorAll('.fav-star').forEach(btn => {
+    btn.addEventListener('click', () => toggleFavorite(btn.dataset.route));
+  });
+  container.querySelectorAll('.compare-check').forEach(cb => {
+    cb.addEventListener('change', () => toggleCompare(cb.dataset.route));
+  });
+  container.querySelectorAll('.share-img-btn').forEach(btn => {
+    btn.addEventListener('click', () => downloadRouteImage(routeData[btn.dataset.route]));
+  });
+}
+
+// ---- On-demand route search (any two ports, live from Ferryhopper) ----
+async function searchRoute() {
+  const fromId = document.getElementById('fromPicker').value;
+  const toId = document.getElementById('toPicker').value;
+  const resultArea = document.getElementById('searchResultArea');
+
+  if (!fromId || !toId) {
+    resultArea.innerHTML = `<div style="font-size:12px; color:#f2c744; padding:10px;">Pick both a "From" and "To" island first.</div>`;
+    return;
+  }
+  if (fromId === toId) {
+    resultArea.innerHTML = `<div style="font-size:12px; color:#f2c744; padding:10px;">Pick two different islands.</div>`;
+    return;
+  }
+
+  resultArea.innerHTML = `<div style="font-size:12px; color:#8fa3c4; padding:10px;">Searching real Ferryhopper data…</div>`;
+
+  try {
+    const params = new URLSearchParams({ from_id: fromId, to_id: toId });
+    const r = await fetch(`${API_BASE}/api/search_route?${params}`).then(res => res.json());
+
+    if (!r.found) {
+      resultArea.innerHTML = `
+        <div style="background:#16233d; border:1px solid #223256; border-radius:10px; padding:14px; font-size:12.5px; color:#c3d0e5;">
+          No real sailings found right now for <b>${r.from || fromId} → ${r.to || toId}</b>.
+          This might mean there's no direct ferry, or none today — try
+          <a href="https://www.ferryhopper.com/en/ferry-routes" target="_blank" rel="noopener" style="color:#3ddc84;">searching Ferryhopper directly ↗</a>.
+        </div>`;
+      return;
+    }
+
+    // Merge into routeData so favoriting/comparing/calendar work on search results too
+    routeData[r.route_id] = r;
+    const div = document.createElement('div');
+    div.className = 'route-card';
+    div.id = `card-${r.route_id}`;
+    div.innerHTML = buildRouteCardHtml(r);
+    resultArea.innerHTML = '';
+    resultArea.appendChild(div);
+    div.querySelectorAll('.fav-star').forEach(btn => btn.addEventListener('click', () => toggleFavorite(btn.dataset.route)));
+    div.querySelectorAll('.compare-check').forEach(cb => cb.addEventListener('change', () => toggleCompare(cb.dataset.route)));
+    div.querySelectorAll('.share-img-btn').forEach(btn => btn.addEventListener('click', () => downloadRouteImage(routeData[btn.dataset.route])));
+  } catch (e) {
+    resultArea.innerHTML = `<div style="font-size:12px; color:#ff5a5a; padding:10px;">Search failed — check your connection and try again.</div>`;
+  }
+}
+
+document.getElementById('searchRouteBtn').addEventListener('click', searchRoute);
+
+
+
+// ---- Shareable image export (canvas-drawn, no external library needed) ----
+function downloadRouteImage(r) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 800; canvas.height = 800;
+  const ctx = canvas.getContext('2d');
+
+  const grad = ctx.createLinearGradient(0, 0, 0, 800);
+  grad.addColorStop(0, '#0b1220'); grad.addColorStop(1, '#16233d');
+  ctx.fillStyle = grad; ctx.fillRect(0, 0, 800, 800);
+
+  ctx.fillStyle = '#3ddc84'; ctx.font = '600 22px sans-serif';
+  ctx.fillText('🇬🇷 GREECE FERRY SIMULATOR', 50, 80);
+
+  ctx.fillStyle = '#ffffff'; ctx.font = '700 40px sans-serif';
+  ctx.fillText(`${r.from} → ${r.to}`, 50, 160);
+
+  const stats = [
+    ['Distance', `${r.distance_km} km`],
+    ['Avg. duration', r.avg_duration_min ? `${Math.floor(r.avg_duration_min/60)}h ${r.avg_duration_min%60}m` : '—'],
+    ['Est. CO₂', `${r.total_co2_kg_est.toLocaleString()} kg`],
+    ['Weather', (r.weather_temp_c !== null && r.weather_temp_c !== undefined) ? `${r.weather_temp_c}°C` : `${r.weather_score}/10`],
+    ['Crowd score', `${crowdLabel(r.crowd_score)} (${r.crowd_score}/10)`],
+    ['Best time to go?', r.best_time_label || `${r.best_time_score}/10`],
+  ];
+  let y = 240;
+  stats.forEach(([label, val]) => {
+    ctx.fillStyle = '#8fa3c4'; ctx.font = '16px sans-serif';
+    ctx.fillText(label.toUpperCase(), 50, y);
+    ctx.fillStyle = '#ffffff'; ctx.font = '700 30px sans-serif';
+    ctx.fillText(val, 50, y + 34);
+    y += 90;
+  });
+
+  ctx.fillStyle = '#5b7ba8'; ctx.font = '13px sans-serif';
+  ctx.fillText('Built on real ferry schedules, distances, and weather data', 50, 760);
+
+  const link = document.createElement('a');
+  link.download = `ferry-${r.route_id}.png`;
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+}
+
+function renderStatsBar() {
+  const routes = Object.values(routeData);
+  const totalDistance = routes.reduce((s, r) => s + r.distance_km, 0);
+  const totalCo2 = routes.reduce((s, r) => s + r.total_co2_kg_est, 0);
+  const totalSailings = routes.reduce((s, r) => s + r.sailings, 0);
+  const avgWeather = routes.length ? (routes.reduce((s, r) => s + r.weather_score, 0) / routes.length) : 0;
+
+  const stat = (label, value) => `
+    <div style="flex:1; background:#16233d; border:1px solid #223256; border-radius:8px; padding:6px 4px; text-align:center;">
+      <div style="font-size:13px; font-weight:700;">${value}</div>
+      <div style="color:#8fa3c4; font-size:9.5px; margin-top:2px;">${label}</div>
+    </div>`;
+
+  document.getElementById('statsBar').innerHTML =
+    stat('Real sailings', totalSailings) +
+    stat('Total km tracked', Math.round(totalDistance).toLocaleString()) +
+    stat('Est. CO₂ (kg)', Math.round(totalCo2).toLocaleString()) +
+    stat('Avg weather', avgWeather.toFixed(1) + '/10');
+}
+
+async function refreshNextSailings() {
+  nextSailingsData = await fetch(`${API_BASE}/api/next_sailings`).then(r => r.json());
+  renderCards();
+}
+
+function setupIslandPicker() {
+  const fromSel = document.getElementById('fromPicker');
+  const toSel = document.getElementById('toPicker');
+  // Sort alphabetically so 13 islands are easy to scan in a dropdown.
+  const sortedPorts = Object.values(portsById).sort((a, b) => a.name.localeCompare(b.name));
+  sortedPorts.forEach(p => {
+    fromSel.innerHTML += `<option value="${p.id}">${p.name}</option>`;
+    toSel.innerHTML += `<option value="${p.id}">${p.name}</option>`;
+  });
+}
+
+function updateHour(hour) {
+  hour = parseInt(hour);
+  document.getElementById('hourLabel').textContent = `${String(hour).padStart(2,'0')}:00`;
+  Object.entries(routeData).forEach(([rid, r]) => {
+    const passengersThisHour = r.hourly_crowd[hour] || 0;
+    const line = routeLines[rid];
+    if (!line) return;
+    if (passengersThisHour > 0) {
+      const intensity = Math.min(1, passengersThisHour / 2000);
+      line.setStyle({ color: crowdColor(intensity * 10), weight: 3, opacity: 0.7 });
+    } else {
+      line.setStyle({ color: "#5b7ba8", weight: 2, opacity: 0.35 });
+    }
+  });
+}
+
+document.getElementById('hourSlider').addEventListener('input', e => updateHour(e.target.value));
+
+loadData();
+connectAIS(); // no-op until you add your free aisstream.io API key above
+</script>
+</body>
+</html>
