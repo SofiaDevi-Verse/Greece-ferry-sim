@@ -324,7 +324,7 @@ def _normalize_trip_record(raw, route_id, trip_date, from_id=None, to_id=None):
                 via_stops.append(str(stop_name))
     via = ";".join(via_stops)
 
-    return {
+    result = {
         "route_id": route_id,
         "from_id": from_id,
         "to_id": to_id,
@@ -335,6 +335,13 @@ def _normalize_trip_record(raw, route_id, trip_date, from_id=None, to_id=None):
         "date": trip_date,
         "via": via,
     }
+    # Log EVERY parsed trip unconditionally (not just failures) — this is
+    # the only way to see the real full set of times Ferryhopper's live
+    # data actually returns, so we can compare directly against what their
+    # own website shows for the same route/date.
+    print(f"[Ferryhopper MCP] parsed trip for {route_id} ({from_id}->{to_id}): "
+          f"{result['operator']} departs {result['departure_time']} arrives {result['arrival_time']}", flush=True)
+    return result
 
 
 def _unwrap_exception_group(e):
@@ -456,6 +463,7 @@ async def get_live_schedule_dataframe():
         if not raw_trips:
             print(f"[Ferryhopper MCP] {from_name} -> {to_name}: nothing usable came back (see above for why)", flush=True)
             return []
+        print(f"[Ferryhopper MCP] {from_name} -> {to_name}: raw response has {len(raw_trips)} trip(s) before filtering", flush=True)
         rows = []
         for raw in raw_trips:
             normalized = _normalize_trip_record(raw, route_id, today_str, from_id=from_id, to_id=to_id)
@@ -488,12 +496,32 @@ async def get_live_schedule_dataframe():
     return pd.DataFrame(all_rows)
 
 
+_KNOWN_SAILINGS_TODAY = {}  # keyed by (route_id, from_id, to_id, departure_time) -> row dict
+_KNOWN_SAILINGS_DATE = None
+
+
 async def get_current_schedule():
     """Returns (dataframe, source) where source is 'live' or 'csv_fallback'.
-    Caches the live result for 20 minutes so we're not hitting Ferryhopper's
-    server on every single page load."""
+
+    Live sailings are ACCUMULATED across the day, not wholesale replaced
+    every refresh — this matters because Ferryhopper's live search only
+    returns trips that haven't departed yet (confirmed by real testing: a
+    real ferry that departed hours ago returns 0 results). If we simply
+    overwrote our cache with each fresh fetch, a ferry we correctly caught
+    while it was still boarding would get silently dropped the moment it
+    aged out of Ferryhopper's "still bookable" results — even though it's
+    genuinely still at sea. Accumulating means once we know about a real
+    sailing, we keep tracking it through its whole real journey today."""
+    global _KNOWN_SAILINGS_DATE
     cache_key = "schedule"
     now = time.time()
+    today_str = today_in_athens()
+
+    # New real day — real sailings from yesterday are gone, start fresh.
+    if _KNOWN_SAILINGS_DATE != today_str:
+        _KNOWN_SAILINGS_TODAY.clear()
+        _KNOWN_SAILINGS_DATE = today_str
+
     if cache_key in _LIVE_SCHEDULE_CACHE:
         ts, df, source = _LIVE_SCHEDULE_CACHE[cache_key]
         if now - ts < _LIVE_SCHEDULE_CACHE_TTL_SECONDS:
@@ -501,8 +529,24 @@ async def get_current_schedule():
 
     live_df = await get_live_schedule_dataframe()
     if live_df is not None and len(live_df) > 0:
-        _LIVE_SCHEDULE_CACHE[cache_key] = (now, live_df, "live")
-        return live_df, "live"
+        # Merge freshly fetched rows into today's accumulated known sailings
+        for _, row in live_df.iterrows():
+            key = (row.get("route_id"), row.get("from_id"), row.get("to_id"), row.get("departure_time"))
+            _KNOWN_SAILINGS_TODAY[key] = row.to_dict()
+
+        merged_df = pd.DataFrame(list(_KNOWN_SAILINGS_TODAY.values()))
+        print(f"[Ferryhopper MCP] accumulated schedule now has {len(merged_df)} known real sailings for today "
+              f"({len(live_df)} in this fetch)", flush=True)
+        _LIVE_SCHEDULE_CACHE[cache_key] = (now, merged_df, "live")
+        return merged_df, "live"
+
+    # Live fetch failed entirely this round — if we have ANY accumulated
+    # sailings from earlier today, keep using those rather than falling
+    # all the way back to the CSV, since real known data > a week-old backup.
+    if _KNOWN_SAILINGS_TODAY:
+        merged_df = pd.DataFrame(list(_KNOWN_SAILINGS_TODAY.values()))
+        _LIVE_SCHEDULE_CACHE[cache_key] = (now, merged_df, "live")
+        return merged_df, "live"
 
     csv_df = load_schedule()
     _LIVE_SCHEDULE_CACHE[cache_key] = (now, csv_df, "csv_fallback")
