@@ -749,6 +749,19 @@ def get_live_ferries(now=None, schedule=None, boarding_window_min=120):
                 })
                 matched = True
                 break
+            # Genuinely departed, but this sailing has no reliable arrival
+            # time (can happen with real third-party live data) — rather
+            # than silently vanishing right at departure, keep showing it,
+            # honestly labeled as "at sea, arrival time unavailable" rather
+            # than faking a position along the route we can't compute.
+            if not has_arrival and dep_total <= now_t <= dep_total + 600:  # cap at 10h, no route we track is longer
+                active.append({
+                    **base_info,
+                    "status": "at_sea_unknown_eta",
+                    "progress": None,
+                })
+                matched = True
+                break
         if matched:
             continue
 
