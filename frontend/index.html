@@ -713,8 +713,85 @@ function parseHM(str) {
 // here — that's handled continuously every frame in animateLiveFerries(),
 // using real elapsed clock time, so movement glides instead of jumping
 // once every poll.
+// Remembers every real sailing we've seen today in the BROWSER itself
+// (localStorage), not just server memory. This matters because free
+// hosting tiers spin the server down after inactivity, and every restart
+// wipes server-side memory — so a ferry we correctly saw boarding could
+// get "forgotten" by the server before it ever shows as at sea. The
+// browser's own memory survives regardless of what the server does.
+function loadKnownSailingsToday() {
+  try {
+    const stored = JSON.parse(localStorage.getItem('known_sailings') || '{}');
+    const today = new Date().toISOString().slice(0, 10);
+    if (stored.date !== today) return {}; // new day, start fresh
+    return stored.sailings || {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function saveKnownSailingsToday(sailings) {
+  const today = new Date().toISOString().slice(0, 10);
+  try {
+    localStorage.setItem('known_sailings', JSON.stringify({ date: today, sailings }));
+  } catch (e) { /* localStorage full or unavailable — degrade gracefully */ }
+}
+
 async function refreshLiveFerries() {
-  const live = await fetch(`${API_BASE}/api/live_ferries`).then(r => r.json());
+  const serverLive = await fetch(`${API_BASE}/api/live_ferries`).then(r => r.json());
+  const known = loadKnownSailingsToday();
+
+  // Merge: anything the server reports right now is authoritative and
+  // updates our memory. Anything we knew about before but the server no
+  // longer mentions (likely because it restarted and forgot, or because
+  // Ferryhopper stopped listing an already-departed trip) is kept from
+  // our own memory instead, with its real status recomputed locally from
+  // real elapsed time — so it doesn't just vanish.
+  const nowMinFull = (() => {
+    const d = new Date();
+    return d.getHours() * 60 + d.getMinutes();
+  })();
+
+  serverLive.forEach(f => {
+    const memKey = `${f.route_id}_${f.from_id}_${f.to_id}_${f.departure_time}`;
+    known[memKey] = {
+      route_id: f.route_id, from_id: f.from_id, to_id: f.to_id,
+      operator: f.operator, vessel_type: f.vessel_type,
+      departure_time: f.departure_time, arrival_time: f.arrival_time, via: f.via,
+    };
+  });
+
+  // Recompute EVERY known sailing's real status locally, so ones the
+  // server forgot still transition correctly based on real elapsed time.
+  const live = Object.values(known).map(s => {
+    const depMin = parseHM(s.departure_time);
+    let status, progress = 0, minutes_until_departure = null;
+    if (s.arrival_time) {
+      let arrMin = parseHM(s.arrival_time);
+      if (arrMin < depMin) arrMin += 24 * 60;
+      let n = nowMinFull; if (n < depMin && (depMin - n) > 720) n += 24 * 60; // handle late-night wrap
+      if (n >= depMin && n <= arrMin) {
+        status = "at_sea";
+        progress = (n - depMin) / Math.max(1, arrMin - depMin);
+      } else if (n < depMin && depMin - n <= 120) {
+        status = "boarding";
+        minutes_until_departure = Math.round(depMin - n);
+      } else if (n > arrMin) {
+        return null; // genuinely arrived, real journey over — stop showing it
+      } else {
+        return null; // more than 2h before departure — not shown yet
+      }
+    } else {
+      let n = nowMinFull; if (n < depMin && (depMin - n) > 720) n += 24 * 60;
+      if (n >= depMin) { status = "at_sea_unknown_eta"; }
+      else if (depMin - n <= 120) { status = "boarding"; minutes_until_departure = Math.round(depMin - n); }
+      else return null;
+    }
+    return { ...s, status, progress, minutes_until_departure };
+  }).filter(Boolean);
+
+  saveKnownSailingsToday(known);
+
   const currentKeys = new Set();
 
   live.forEach((f) => {
