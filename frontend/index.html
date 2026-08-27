@@ -786,6 +786,23 @@ async function refreshLiveFerries() {
       return;
     }
 
+    if (f.status === "at_sea_unknown_eta") {
+      // Real ferry, genuinely departed — but this specific sailing didn't
+      // come with a reliable arrival time from the live source, so we
+      // honestly can't compute its position along the route. Shown at
+      // the midpoint of the route with a clearly honest label, rather
+      // than either vanishing or faking a precise position we don't have.
+      const midIdx = Math.floor(realPath.length / 2);
+      const marker = L.marker(realPath[midIdx], { icon: getFerryIcon(f.operator, "at_sea") })
+        .addTo(map)
+        .bindTooltip(
+          `🚢 At sea: ${f.operator || "Unknown operator"}${viaText} — departed ${f.departure_time} (exact position unavailable)`,
+          { permanent: false }
+        );
+      liveTracked[key] = { status: "at_sea_unknown_eta", marker, line: null };
+      return;
+    }
+
     let depMin = parseHM(f.departure_time);
     let arrMin = parseHM(f.arrival_time);
     if (arrMin < depMin) arrMin += 24 * 60; // overnight sailing
