@@ -112,6 +112,8 @@
   <div class="sub" style="margin-top:-10px; margin-bottom:14px; line-height:1.5;">
     <span style="color:#5b7ba8;">┄┄</span> Port connections (reference only)<br>
     <span style="color:#3ddc84;">┄┄</span> Real sailing in progress — click the ferry icon for stops &amp; ETAs<br>
+    <span style="color:#f2c744;">●</span> Boarding — departs within 40 minutes<br>
+    <span style="color:#5b7ba8;">●</span> Docked — scheduled to depart within 2 hours<br>
     📍 Click any blue dot on the map for port info
   </div>
 
@@ -504,7 +506,9 @@ function connectAIS() {
   ws.onerror = (e) => console.warn("AIS connection issue — check your API key.", e);
 }
 
-function getFerryIcon(operatorName, isLive) {
+function getFerryIcon(operatorName, status) {
+  // Backward-compatible: accepts true/false (old callers) or a status
+  // string ("at_sea" / "boarding") for the newer boarding-ferry feature.
   const name = (operatorName || "").toLowerCase();
   let emoji = "🚢"; // generic fallback
   if (name.includes("seajet")) emoji = "🚤";           // high-speed catamaran operator
@@ -512,7 +516,11 @@ function getFerryIcon(operatorName, isLive) {
   else if (name.includes("golden star")) emoji = "🛥️";
   else if (name.includes("hellenic")) emoji = "🛳️";
 
-  const ring = isLive ? "box-shadow:0 0 0 2px #3ddc84; border-radius:50%;" : "";
+  let ring = "";
+  if (status === true || status === "at_sea") ring = "box-shadow:0 0 0 2px #3ddc84; border-radius:50%;";
+  else if (status === "boarding") ring = "box-shadow:0 0 0 2px #f2c744; border-radius:50%;";
+  else if (status === "docked") ring = "box-shadow:0 0 0 2px #5b7ba8; border-radius:50%;";
+
   // No drop-shadow filter here — it was visually shifting the emoji's
   // apparent center away from its true anchor point, causing the icon
   // to look misaligned from the line, especially when zoomed in.
@@ -724,11 +732,29 @@ async function refreshLiveFerries() {
     const stops = built.stops;
     if (realPath.length < 2 || stops.length < 2) return;
 
+    const viaText = f.via && f.via.length ? ` via ${f.via.join(", ")}` : "";
+
+    if (f.status === "boarding") {
+      // Real ferry, real departure coming up, genuinely docked at the
+      // origin port right now — a stationary marker, not a moving one,
+      // and no route line yet since it hasn't actually departed. Label
+      // is honest about how close it actually is — a ferry sitting at
+      // dock 2 hours out isn't literally "boarding" yet in reality.
+      const mins = f.minutes_until_departure;
+      const label = mins <= 40
+        ? `🛳️ Boarding: ${f.operator || "Unknown operator"}${viaText} — departs in ${mins}m`
+        : `⚓ Docked: ${f.operator || "Unknown operator"}${viaText} — departs in ${Math.floor(mins/60)}h ${mins%60}m`;
+      const marker = L.marker(realPath[0], { icon: getFerryIcon(f.operator, mins <= 40 ? "boarding" : "docked") })
+        .addTo(map)
+        .bindTooltip(label, { permanent: false });
+      liveTracked[key] = { status: "boarding", marker, line: null };
+      return;
+    }
+
     let depMin = parseHM(f.departure_time);
     let arrMin = parseHM(f.arrival_time);
     if (arrMin < depMin) arrMin += 24 * 60; // overnight sailing
 
-    const viaText = f.via && f.via.length ? ` via ${f.via.join(", ")}` : "";
     const line = L.polyline(realPath, {
       color: "#3ddc84", weight: 3, opacity: 0.9, dashArray: "1,6"
     }).addTo(map);
@@ -742,7 +768,7 @@ async function refreshLiveFerries() {
 
     marker.on("click", () => {
       const t = liveTracked[key];
-      if (!t) return;
+      if (!t || t.status === "boarding") return;
       // Recompute live progress at the moment of the click, not the stale
       // value from when the marker was first created.
       const now = new Date();
@@ -752,14 +778,14 @@ async function refreshLiveFerries() {
       marker.setPopupContent(buildFerryPopupHtml(f.operator, f.vessel_type, stops, t.depMin, t.arrMin, liveProgress));
     });
 
-    liveTracked[key] = { path: realPath, stops, depMin, arrMin, marker, line };
+    liveTracked[key] = { status: "at_sea", path: realPath, stops, depMin, arrMin, marker, line };
   });
 
   // Remove tracking for any sailing that's no longer active (arrived, etc.)
   Object.keys(liveTracked).forEach(key => {
     if (!currentKeys.has(key)) {
       map.removeLayer(liveTracked[key].marker);
-      map.removeLayer(liveTracked[key].line);
+      if (liveTracked[key].line) map.removeLayer(liveTracked[key].line);
       delete liveTracked[key];
     }
   });
@@ -775,6 +801,7 @@ function animateLiveFerries() {
   const nowMin = now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60;
 
   Object.values(liveTracked).forEach(t => {
+    if (t.status === "boarding") return; // stationary at the dock — nothing to animate
     let candidateNow = nowMin;
     if (candidateNow < t.depMin) candidateNow += 24 * 60; // handle wrap past midnight
     let progress = (candidateNow - t.depMin) / Math.max(1, (t.arrMin - t.depMin));
