@@ -253,11 +253,15 @@ def _extract_hhmm(value):
     return s[:5]
 
 
-def _normalize_trip_record(raw, route_id, trip_date):
+def _normalize_trip_record(raw, route_id, trip_date, from_id=None, to_id=None):
     """Ferryhopper's real response wraps each trip's actual departure/
     arrival inside a 'segments' array (confirmed live) — not flat fields on
     the trip itself, since a sailing can have multiple legs/stops. This
-    reads the first segment's departure and the last segment's arrival."""
+    reads the first segment's departure and the last segment's arrival.
+    from_id/to_id record the REAL direction this specific sailing actually
+    goes — ferries run both ways, and a route can be queried in either
+    direction, so we can't assume every row matches the route's canonical
+    from->to order."""
     def first_present(d, keys):
         for k in keys:
             if isinstance(d, dict) and k in d and d[k] not in (None, ""):
@@ -322,6 +326,8 @@ def _normalize_trip_record(raw, route_id, trip_date):
 
     return {
         "route_id": route_id,
+        "from_id": from_id,
+        "to_id": to_id,
         "operator": str(operator),
         "departure_time": _extract_hhmm(dep),
         "arrival_time": _extract_hhmm(arr),
@@ -421,20 +427,23 @@ async def _fetch_live_trips(departure_name, arrival_name, trip_date):
 
 async def get_live_schedule_dataframe():
     """Queries Ferryhopper's live MCP server for every route we track, for
-    today's real date. Returns a real pandas DataFrame if at least one route
-    returned usable data, otherwise None (signals: fall back to the CSV)."""
+    today's real date — in BOTH directions, since real ferries run both
+    ways and only checking one direction was silently missing roughly half
+    of all real traffic. Returns a real pandas DataFrame if at least one
+    direction returned usable data, otherwise None (signals: fall back to
+    the CSV)."""
     import asyncio
 
     ports_by_id, routes = load_ports()
     today_str = today_in_athens()
 
-    async def fetch_one(route):
+    async def fetch_direction(from_id, to_id, route_id):
         # Strip parenthetical qualifiers like "(New Port)" or "(Parikia)" —
         # Ferryhopper's location lookup appears to want the plain island
         # name, confirmed by some routes erroring with the fuller name
         # while plain names (Piraeus, Naxos) succeeded.
-        raw_from = ports_by_id[route["from"]]["name"]
-        raw_to = ports_by_id[route["to"]]["name"]
+        raw_from = ports_by_id[from_id]["name"]
+        raw_to = ports_by_id[to_id]["name"]
         from_name = re.sub(r"\s*\(.*?\)", "", raw_from).strip()
         to_name = re.sub(r"\s*\(.*?\)", "", raw_to).strip()
         try:
@@ -449,19 +458,24 @@ async def get_live_schedule_dataframe():
             return []
         rows = []
         for raw in raw_trips:
-            normalized = _normalize_trip_record(raw, route["id"], today_str)
+            normalized = _normalize_trip_record(raw, route_id, today_str, from_id=from_id, to_id=to_id)
             if normalized:
                 rows.append(normalized)
         return rows
 
-    # Sequential, not concurrent — firing all 9 requests at once appeared to
+    # Sequential, not concurrent — firing many requests at once appeared to
     # trigger "Server returned an error response" on most of them, while a
     # single request succeeded. One at a time, with a small pause, is much
-    # gentler on their server.
+    # gentler on their server. This now takes roughly twice as long as
+    # before (both directions per route), but the 20-minute cache means
+    # this cost is only paid occasionally, not on every page load.
     all_rows = []
     for route in routes:
-        route_rows = await fetch_one(route)
-        all_rows.extend(route_rows)
+        fwd_rows = await fetch_direction(route["from"], route["to"], route["id"])
+        all_rows.extend(fwd_rows)
+        await asyncio.sleep(0.3)
+        rev_rows = await fetch_direction(route["to"], route["from"], route["id"])
+        all_rows.extend(rev_rows)
         await asyncio.sleep(0.3)
 
     if not all_rows:
@@ -469,7 +483,7 @@ async def get_live_schedule_dataframe():
         return None
 
     routes_with_data = set(row["route_id"] for row in all_rows)
-    print(f"[Ferryhopper MCP] got {len(all_rows)} real live sailings across "
+    print(f"[Ferryhopper MCP] got {len(all_rows)} real live sailings (both directions) across "
           f"{len(routes_with_data)} routes", flush=True)
     return pd.DataFrame(all_rows)
 
@@ -707,8 +721,19 @@ def get_live_ferries(now=None, schedule=None, boarding_window_min=120):
             if pd.notna(via_raw) and str(via_raw).strip()
             else []
         )
+        # Real actual direction for this specific sailing — falls back to
+        # splitting route_id (the old assumption) only for CSV rows that
+        # predate this fix and don't carry explicit from_id/to_id.
+        row_from_id = row.get("from_id")
+        row_to_id = row.get("to_id")
+        if pd.isna(row_from_id) or not row_from_id:
+            parts = row["route_id"].split("_", 1)
+            row_from_id, row_to_id = (parts[0], parts[1]) if len(parts) == 2 else (None, None)
+
         base_info = {
             "route_id": row["route_id"],
+            "from_id": row_from_id,
+            "to_id": row_to_id,
             "operator": row.get("operator", None),
             "vessel_type": row.get("vessel_type", None),
             "departure_time": row["departure_time"],
