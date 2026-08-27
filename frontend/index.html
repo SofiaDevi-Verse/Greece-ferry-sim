@@ -725,7 +725,19 @@ async function refreshLiveFerries() {
 
     const key = f.route_id + "_" + f.departure_time;
     currentKeys.add(key);
-    if (liveTracked[key]) return; // already being tracked/animated
+
+    // Re-create the marker if it doesn't exist yet, OR if it exists but its
+    // status has changed (e.g. boarding -> at_sea once it actually departs)
+    // — this was the bug: a status change was being silently ignored,
+    // leaving a departed ferry stuck as a stationary "boarding" icon
+    // forever instead of becoming a moving one.
+    const existing = liveTracked[key];
+    if (existing && existing.status === f.status) return;
+    if (existing) {
+      map.removeLayer(existing.marker);
+      if (existing.line) map.removeLayer(existing.line);
+      delete liveTracked[key];
+    }
 
     const built = buildRealPath(fromId, f.via, toId);
     const realPath = built.path;
@@ -746,7 +758,30 @@ async function refreshLiveFerries() {
         : `⚓ Docked: ${f.operator || "Unknown operator"}${viaText} — departs in ${Math.floor(mins/60)}h ${mins%60}m`;
       const marker = L.marker(realPath[0], { icon: getFerryIcon(f.operator, mins <= 40 ? "boarding" : "docked") })
         .addTo(map)
-        .bindTooltip(label, { permanent: false });
+        .bindTooltip(label, { permanent: false })
+        .bindPopup(""); // filled in on click, so the countdown is always fresh
+
+      marker.on("click", () => {
+        // Dedicated popup for a not-yet-departed sailing — no in-progress
+        // percentage, just the real route and real ETA per stop.
+        const depMin = parseHM(f.departure_time);
+        const arrMin = f.arrival_time ? parseHM(f.arrival_time) : depMin;
+        const adjArr = arrMin < depMin ? arrMin + 24 * 60 : arrMin;
+        const stopRows = buildStopEtas(stops, depMin, adjArr).map(e =>
+          `<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0;${e.isEndpoint ? 'font-weight:600;' : ''}">
+            <span>${e.name}</span><span>${e.time}</span>
+          </div>`
+        ).join("");
+        marker.setPopupContent(`
+          <div style="min-width:220px;font-family:-apple-system,sans-serif;">
+            <div style="font-size:14px;font-weight:700;margin-bottom:2px;">${f.operator || "Unknown operator"}</div>
+            <div style="font-size:11px;color:#8fa3c4;margin-bottom:8px;">${vesselTypeLabel(f.vessel_type)} — ${mins <= 40 ? "boarding now" : "docked, not yet boarding"}</div>
+            <div style="border-top:1px solid #2a3a5c;padding-top:6px;">${stopRows}</div>
+            <div style="margin-top:8px;font-size:12px;color:#f2c744;">Departs in ${mins <= 40 ? mins + 'm' : Math.floor(mins/60) + 'h ' + (mins%60) + 'm'}</div>
+          </div>
+        `);
+      });
+
       liveTracked[key] = { status: "boarding", marker, line: null };
       return;
     }
