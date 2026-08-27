@@ -720,10 +720,14 @@ async function refreshLiveFerries() {
   live.forEach((f) => {
     const route = routeData[f.route_id];
     if (!route) return;
-    const [fromId, toId] = f.route_id.split("_");
+    // Real actual direction — a sailing might be going the reverse way
+    // from the route's canonical from->to, since ferries run both ways.
+    // Falls back to splitting route_id for older cached responses.
+    const fromId = f.from_id || f.route_id.split("_")[0];
+    const toId = f.to_id || f.route_id.split("_")[1];
     if (!portsById[fromId] || !portsById[toId]) return;
 
-    const key = f.route_id + "_" + f.departure_time;
+    const key = f.route_id + "_" + f.departure_time + "_" + fromId;
     currentKeys.add(key);
 
     // Re-create the marker if it doesn't exist yet, OR if it exists but its
