@@ -3,7 +3,11 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Greece Ferry Traffic Simulator</title>
+<title>Live Greek Ferry Tracker — Real-Time Routes, Weather &amp; Crowds</title>
+<meta name="description" content="Track real-time ferry sailings across the Greek islands — live departure times, crowd levels, weather, and CO₂ estimates for Piraeus, Mykonos, Santorini, Crete, Rhodes and more." />
+<meta property="og:title" content="Live Greek Ferry Tracker" />
+<meta property="og:description" content="Real-time ferry sailings, crowd levels, and weather across the Greek islands — built on live data." />
+<meta property="og:type" content="website" />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
 <style>
   html, body { margin: 0; height: 100%; font-family: -apple-system, Helvetica, Arial, sans-serif; background: #0b1220; transition: background 0.6s ease; }
@@ -840,10 +844,27 @@ async function loadDataInner() {
     const from = portsById[route.from];
     const to = portsById[route.to];
 
-    // Thin background reference line just to show which ports connect —
-    // NOT a claim about the exact path (that's what the live/real via-stop
-    // line above is for, when a sailing is actually in progress).
-    const line = L.polyline([[from.lat, from.lon], [to.lat, to.lon]], {
+    // Use the REAL stopover islands from this route's actual sailings
+    // (not a generic straight/bowed guess) when we have them — picks the
+    // via-stops from whichever real sailing has the most of them, so the
+    // reference line reflects an actual real path a ferry takes, not just
+    // a straight line cutting across land.
+    const routeInfo = routeData[route.id];
+    let referencePath;
+    if (routeInfo && routeInfo.sailings_detail && routeInfo.sailings_detail.length) {
+      const withMostStops = routeInfo.sailings_detail.reduce((best, s) =>
+        (s.via && s.via.length > (best.via || []).length) ? s : best, routeInfo.sailings_detail[0]);
+      const built = buildRealPath(route.from, withMostStops.via || [], route.to);
+      referencePath = built.path;
+    }
+    if (!referencePath || referencePath.length < 2) {
+      referencePath = [[from.lat, from.lon], [to.lat, to.lon]];
+    }
+
+    // Thin background reference line — real via-stops when we have them,
+    // otherwise just a plain connector (still not a claim of pixel-perfect
+    // sea routing, but genuinely accurate where we have real stop data).
+    const line = L.polyline(referencePath, {
       color: "#5b7ba8", weight: 2, opacity: 0.35, dashArray: "2,8"
     }).addTo(map);
     routeLines[route.id] = line;
